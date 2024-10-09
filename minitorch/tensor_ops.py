@@ -12,11 +12,12 @@ from .tensor_data import (
     index_to_position,
     shape_broadcast,
     to_index,
+    Index,
 )
 
 if TYPE_CHECKING:
     from .tensor import Tensor
-    from .tensor_data import Index, Shape, Storage, Strides
+    from .tensor_data import Shape, Storage, Strides, Index
 
 
 class MapProto(Protocol):
@@ -41,7 +42,9 @@ class TensorOps:
     @staticmethod
     def reduce(
         fn: Callable[[float, float], float], start: float = 0.0
-    ) -> Callable[[Tensor, int], Tensor]: ...
+    ) -> Callable[[Tensor, int], Tensor]:
+        """Reduce placeholder"""
+        ...
 
     @staticmethod
     def matrix_multiply(a: Tensor, b: Tensor) -> Tensor:
@@ -57,10 +60,12 @@ class TensorBackend:
         that implements map, zip, and reduce higher-order functions.
 
         Args:
+        ----
             ops : tensor operations object see `tensor_ops.py`
 
 
         Returns:
+        -------
             A collection of tensor functions
 
         """
@@ -112,12 +117,14 @@ class SimpleOps(TensorOps):
                     out[i, j] = fn(a[i, 0])
 
         Args:
+        ----
             fn: function from float-to-float to apply.
             a (:class:`TensorData`): tensor to map over
             out (:class:`TensorData`): optional, tensor data to fill in,
                    should broadcast with `a`
 
         Returns:
+        -------
             new tensor data
 
         """
@@ -154,11 +161,13 @@ class SimpleOps(TensorOps):
 
 
         Args:
+        ----
             fn: function from two floats-to-float to apply
             a (:class:`TensorData`): tensor to zip over
             b (:class:`TensorData`): tensor to zip over
 
         Returns:
+        -------
             :class:`TensorData` : new tensor data
 
         """
@@ -193,11 +202,14 @@ class SimpleOps(TensorOps):
 
 
         Args:
+        ----
             fn: function from two floats-to-float to apply
             a (:class:`TensorData`): tensor to reduce over
             dim (int): int of dim to reduce
+            start: starting value for reduction
 
         Returns:
+        -------
             :class:`TensorData` : new tensor
 
         """
@@ -246,9 +258,11 @@ def tensor_map(
       broadcast. (`in_shape` must be smaller than `out_shape`).
 
     Args:
+    ----
         fn: function from float-to-float to apply
 
     Returns:
+    -------
         Tensor map function.
 
     """
@@ -261,8 +275,32 @@ def tensor_map(
         in_shape: Shape,
         in_strides: Strides,
     ) -> None:
-        # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+        if len(out_shape) > MAX_DIMS or len(in_shape) > MAX_DIMS:
+            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
+
+        # Simple version:
+        # if in_shape == out_shape:
+        #     for i in range(len(in_storage)):
+        #         out[i] = fn(in_storage[i])
+        #     return
+
+        # Broadcasted version:
+        in_index: Index = np.array([0] * len(in_shape))
+        out_index: Index = np.array([0] * len(out_shape))
+
+        outsize = 1
+        for s in out_shape:
+            outsize *= s
+
+        for i in range(outsize):
+            # Convert position in storage to index
+            to_index(i, out_shape, out_index)
+            # Map out_index to corresponding in_index with broadcasting
+            broadcast_index(out_index, out_shape, in_shape, in_index)
+            # Convert in_index to position in storage
+            in_position = index_to_position(in_index, in_strides)
+            # Apply function to fill the out array
+            out[i] = fn(in_storage[in_position])
 
     return _map
 
@@ -288,9 +326,11 @@ def tensor_zip(
       and `b_shape` broadcast to `out_shape`.
 
     Args:
+    ----
         fn: function mapping two floats to float to apply
 
     Returns:
+    -------
         Tensor zip function.
 
     """
@@ -306,8 +346,43 @@ def tensor_zip(
         b_shape: Shape,
         b_strides: Strides,
     ) -> None:
-        # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+        if (
+            len(out_shape) > MAX_DIMS
+            or len(a_shape) > MAX_DIMS
+            or len(b_shape) > MAX_DIMS
+        ):
+            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
+
+        # Simple version:
+        # if len(a_shape) == len(b_shape) == len(out_shape) and \
+        # all(a == b == o for a, b, o in zip(a_shape, b_shape, out_shape)):
+        #     for i, (a, b) in enumerate(zip(a_storage, b_storage)):
+        #         out[i] = fn(a, b)
+        #     return
+
+        # Broadcasted version:
+        out_index: Index = np.array([0] * len(out_shape))
+        a_index: Index = np.array([0] * len(a_shape))
+        b_index: Index = np.array([0] * len(b_shape))
+
+        outsize = 1
+        for s in out_shape:
+            outsize *= s
+
+        for i in range(outsize):
+            # Convert position in storage to index
+            to_index(i, out_shape, out_index)
+
+            # Map out_index to corresponding a_index and b_index with broadcasting
+            broadcast_index(out_index, out_shape, a_shape, a_index)
+            broadcast_index(out_index, out_shape, b_shape, b_index)
+
+            # Convert a_index and b_index to position in storage
+            a_position = index_to_position(a_index, a_strides)
+            b_position = index_to_position(b_index, b_strides)
+
+            # Apply function to fill the out array
+            out[i] = fn(a_storage[a_position], b_storage[b_position])
 
     return _zip
 
@@ -321,9 +396,11 @@ def tensor_reduce(
        except with `reduce_dim` turned to size `1`
 
     Args:
+    ----
         fn: reduction function mapping two floats to float
 
     Returns:
+    -------
         Tensor reduce function.
 
     """
@@ -337,8 +414,27 @@ def tensor_reduce(
         a_strides: Strides,
         reduce_dim: int,
     ) -> None:
-        # TODO: Implement for Task 2.3.
-        raise NotImplementedError("Need to implement for Task 2.3")
+        if len(out_shape) > MAX_DIMS or len(a_shape) > MAX_DIMS:
+            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
+
+        reduce_size = a_shape[reduce_dim]
+        out_index: Index = np.array([0] * len(out_shape))  # for out-shape, not a-shape
+
+        outsize = 1
+        for s in out_shape:
+            outsize *= s
+
+        for i in range(outsize):
+            to_index(i, out_shape, out_index)
+            accumulator = out[i]
+
+            # Reduce across reduce_dim for each element in out
+            for j in range(reduce_size):
+                out_index[reduce_dim] = j  # for every jth element along reduce_dim
+                a_position = index_to_position(out_index, a_strides)
+                accumulator = fn(accumulator, a_storage[a_position])
+
+            out[i] = accumulator
 
     return _reduce
 
