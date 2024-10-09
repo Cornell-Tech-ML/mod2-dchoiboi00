@@ -122,10 +122,7 @@ class Mul(Function):
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, Tensor]:
         """Backward for multiply"""
         t1, t2 = ctx.saved_values
-        return (
-            grad_output.f.mul_zip(grad_output, t2),
-            grad_output.f.mul_zip(grad_output, t1),
-        )
+        return grad_output * t2, grad_output * t1
 
 
 class Sigmoid(Function):
@@ -189,17 +186,14 @@ class Exp(Function):
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
         """Backward for exp"""
         (out,) = ctx.saved_values
-        return grad_output.f.mul_zip(out, grad_output)
+        return out * grad_output
 
 
 class Sum(Function):
     @staticmethod
     def forward(ctx: Context, a: Tensor, dim: Tensor) -> Tensor:
         """Sum forward"""
-        if dim is not None:
-            return a.f.add_reduce(a, int(dim.item()))
-        else:  # sum all elements into one element
-            return a.f.add_reduce(a.contiguous().view(int(operators.prod(a.shape))), 0)
+        return a.f.add_reduce(a, int(dim.item()))
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tuple[Tensor, float]:
