@@ -46,10 +46,10 @@ def index_to_position(index: Index, strides: Strides) -> int:
         Position in storage
 
     """
-    for i, s in zip(index, strides):
-        if i < 0:
-            raise IndexingError(f"Index {index} out of range.")
-    return sum(i * s for i, s in zip(index, strides))
+    position = 0
+    for ind, stride in zip(index, strides):
+        position += ind * stride
+    return position
 
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
@@ -65,17 +65,11 @@ def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
         out_index : return index corresponding to position.
 
     """
-    if len(out_index) != len(shape):
-        raise ValueError("out_index must have the same length as shape")
-
-    # Get contiguous stride from shape
-    strides = strides_from_shape(list(shape))
-
-    # Each stride[i] can only take values up to shape[i] - 1
-    # We can use the ordinal to determine the index
-    for i in range(len(shape)):
-        out_index[i] = ordinal // strides[i]
-        ordinal = ordinal % strides[i]
+    cur_ord = ordinal + 0
+    for i in range(len(shape) - 1, -1, -1):
+        sh = shape[i]
+        out_index[i] = int(cur_ord % sh)
+        cur_ord = cur_ord // sh
 
 
 def broadcast_index(
@@ -99,15 +93,12 @@ def broadcast_index(
         None
 
     """
-    # padding for smaller shape
-    pad_dims = len(big_shape) - len(shape)
-
-    for dim in range(len(shape)):
-        big_dim = dim + pad_dims
-        if shape[dim] > 1:  # shape has a dimension
-            out_index[dim] = big_index[big_dim]
-        else:  # shape is broadcasted at this dimension
-            out_index[dim] = 0
+    for i, s in enumerate(shape):
+        if s > 1:
+            out_index[i] = big_index[i + (len(big_shape) - len(shape))]
+        else:
+            out_index[i] = 0
+    return None
 
 
 def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
@@ -127,34 +118,27 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
         IndexingError : if cannot broadcast
 
     """
-    # valid tuples
-    # if len(shape1) < 1 or len(shape2) < 1:
-    #     raise IndexingError(
-    #         "Shapes cannot be broadcasted. One of the tensors doesn't have dim{}{}".format(shape1, shape2)
-    #     )
-
-    # pad smaller shape with ones on the left
-    if len(shape1) != len(shape2):
-        pad_dims = abs(len(shape1) - len(shape2))
-        if len(shape1) < len(shape2):
-            shape1 = (1,) * pad_dims + tuple(shape1)
+    a, b = shape1, shape2
+    m = max(len(a), len(b))
+    c_rev = [0] * m
+    a_rev = list(reversed(a))
+    b_rev = list(reversed(b))
+    for i in range(m):
+        if i >= len(a):
+            c_rev[i] = b_rev[i]
+        elif i >= len(b):
+            c_rev[i] = a_rev[i]
         else:
-            shape2 = (1,) * pad_dims + tuple(shape2)
-
-    # check index by index
-    broadcasted_shape = []
-    for s1, s2 in zip(shape1, shape2):
-        if s1 == s2:
-            broadcasted_shape.append(s1)
-        elif s1 == 1:
-            broadcasted_shape.append(s2)
-        elif s2 == 1:
-            broadcasted_shape.append(s1)
-        else:
-            raise IndexingError(
-                "Shapes cannot be broadcasted. {} and {}".format(shape1, shape2)
-            )
-    return tuple(broadcasted_shape)
+            c_rev[i] = max(a_rev[i], b_rev[i])
+            if a_rev[i] != c_rev[i] and a_rev[i] != 1:
+                raise IndexingError(
+                    "Shapes cannot be broadcasted. {} and {}".format(shape1, shape2)
+                )
+            if b_rev[i] != c_rev[i] and b_rev[i] != 1:
+                raise IndexingError(
+                    "Shapes cannot be broadcasted. {} and {}".format(shape1, shape2)
+                )
+    return tuple(reversed(c_rev))
 
 
 def strides_from_shape(shape: UserShape) -> UserStrides:
@@ -291,8 +275,8 @@ class TensorData:
             range(len(self.shape))
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
 
-        new_shape = tuple(self.shape[i] for i in order)
-        new_strides = tuple(self.strides[i] for i in order)
+        new_shape = tuple([self.shape[i] for i in order])
+        new_strides = tuple([self._strides[i] for i in order])
         return TensorData(self._storage, new_shape, new_strides)
 
     def to_string(self) -> str:

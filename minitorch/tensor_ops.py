@@ -275,32 +275,14 @@ def tensor_map(
         in_shape: Shape,
         in_strides: Strides,
     ) -> None:
-        if len(out_shape) > MAX_DIMS or len(in_shape) > MAX_DIMS:
-            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
-
-        # Simple version:
-        # if in_shape == out_shape:
-        #     for i in range(len(in_storage)):
-        #         out[i] = fn(in_storage[i])
-        #     return
-
-        # Broadcasted version:
-        in_index: Index = np.array([0] * len(in_shape))
-        out_index: Index = np.array([0] * len(out_shape))
-
-        outsize = 1
-        for s in out_shape:
-            outsize *= s
-
-        for i in range(outsize):
-            # Convert position in storage to index
+        out_index: Index = np.zeros(MAX_DIMS, np.int32)
+        in_index: Index = np.zeros(MAX_DIMS, np.int32)
+        for i in range(len(out)):
             to_index(i, out_shape, out_index)
-            # Map out_index to corresponding in_index with broadcasting
             broadcast_index(out_index, out_shape, in_shape, in_index)
-            # Convert in_index to position in storage
-            in_position = index_to_position(in_index, in_strides)
-            # Apply function to fill the out array
-            out[i] = fn(in_storage[in_position])
+            o = index_to_position(out_index, out_strides)
+            j = index_to_position(in_index, in_strides)
+            out[o] = fn(in_storage[j])
 
     return _map
 
@@ -346,43 +328,17 @@ def tensor_zip(
         b_shape: Shape,
         b_strides: Strides,
     ) -> None:
-        if (
-            len(out_shape) > MAX_DIMS
-            or len(a_shape) > MAX_DIMS
-            or len(b_shape) > MAX_DIMS
-        ):
-            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
-
-        # Simple version:
-        # if len(a_shape) == len(b_shape) == len(out_shape) and \
-        # all(a == b == o for a, b, o in zip(a_shape, b_shape, out_shape)):
-        #     for i, (a, b) in enumerate(zip(a_storage, b_storage)):
-        #         out[i] = fn(a, b)
-        #     return
-
-        # Broadcasted version:
-        out_index: Index = np.array([0] * len(out_shape))
-        a_index: Index = np.array([0] * len(a_shape))
-        b_index: Index = np.array([0] * len(b_shape))
-
-        outsize = 1
-        for s in out_shape:
-            outsize *= s
-
-        for i in range(outsize):
-            # Convert position in storage to index
+        out_index: Index = np.zeros(MAX_DIMS, np.int32)
+        a_index: Index = np.zeros(MAX_DIMS, np.int32)
+        b_index: Index = np.zeros(MAX_DIMS, np.int32)
+        for i in range(len(out)):
             to_index(i, out_shape, out_index)
-
-            # Map out_index to corresponding a_index and b_index with broadcasting
+            o = index_to_position(out_index, out_strides)
             broadcast_index(out_index, out_shape, a_shape, a_index)
+            j = index_to_position(a_index, a_strides)
             broadcast_index(out_index, out_shape, b_shape, b_index)
-
-            # Convert a_index and b_index to position in storage
-            a_position = index_to_position(a_index, a_strides)
-            b_position = index_to_position(b_index, b_strides)
-
-            # Apply function to fill the out array
-            out[i] = fn(a_storage[a_position], b_storage[b_position])
+            k = index_to_position(b_index, b_strides)
+            out[o] = fn(a_storage[j], b_storage[k])
 
     return _zip
 
@@ -414,27 +370,15 @@ def tensor_reduce(
         a_strides: Strides,
         reduce_dim: int,
     ) -> None:
-        if len(out_shape) > MAX_DIMS or len(a_shape) > MAX_DIMS:
-            raise ValueError(f"Tensor dimensions cannot exceed {MAX_DIMS}")
-
+        out_index: Index = np.zeros(MAX_DIMS, np.int32)
         reduce_size = a_shape[reduce_dim]
-        out_index: Index = np.array([0] * len(out_shape))  # for out-shape, not a-shape
-
-        outsize = 1
-        for s in out_shape:
-            outsize *= s
-
-        for i in range(outsize):
+        for i in range(len(out)):
             to_index(i, out_shape, out_index)
-            accumulator = out[i]
-
-            # Reduce across reduce_dim for each element in out
-            for j in range(reduce_size):
-                out_index[reduce_dim] = j  # for every jth element along reduce_dim
-                a_position = index_to_position(out_index, a_strides)
-                accumulator = fn(accumulator, a_storage[a_position])
-
-            out[i] = accumulator
+            o = index_to_position(out_index, out_strides)
+            for s in range(reduce_size):
+                out_index[reduce_dim] = s
+                j = index_to_position(out_index, a_strides)
+                out[o] = fn(out[o], a_storage[j])
 
     return _reduce
 

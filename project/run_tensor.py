@@ -26,24 +26,20 @@ class Network(minitorch.Module):
 class Linear(minitorch.Module):
     def __init__(self, in_size, out_size):
         super().__init__()
-        self.weights = RParam(in_size, 1, out_size)
+        self.weights = RParam(in_size, out_size)
         self.bias = RParam(out_size)
-        self.in_size = in_size
         self.out_size = out_size
 
-    def forward(self, inputs):
-        # Weights are (in, 1, out)
+    def forward(self, x):
+        # Weights are (in, out)
         # Inputs are (batch, in)
-
-        # (in, batch, 1) for input shape
-        b_size = inputs.shape[0]
-        inputs_T = inputs.view(1, b_size, self.in_size).permute(2, 1, 0)
-
-        # Use broadcasting to get:
-        # (in, 1, out) * (in, batch, 1) -> (in, batch, out)
-        broadcasted = self.weights.value * inputs_T
-        product = broadcasted.sum(0).view(b_size, self.out_size)  # Sum over in, then collapse
-        return product + self.bias.value
+        # (1, in, out) * (batch, in, 1) = (batch, in, out)
+        # Sum over in to get (batch, out)
+        batch, in_size = x.shape
+        return (
+            self.weights.value.view(1, in_size, self.out_size)
+            * x.view(batch, in_size, 1)
+        ).sum(1).view(batch, self.out_size) + self.bias.value.view(self.out_size)
 
 
 def default_log_fn(epoch, total_loss, correct, losses):

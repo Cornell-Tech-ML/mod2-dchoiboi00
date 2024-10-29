@@ -305,7 +305,7 @@ class Tensor:
         return Add.apply(self, self._ensure_tensor(b))
 
     def __sub__(self, b: TensorLike) -> Tensor:
-        return Add.apply(self, Neg.apply(self._ensure_tensor(b)))
+        return Add.apply(self, -self._ensure_tensor(b))
 
     def __mul__(self, b: TensorLike) -> Tensor:
         return Mul.apply(self, self._ensure_tensor(b))
@@ -313,7 +313,7 @@ class Tensor:
     def __lt__(self, b: TensorLike) -> Tensor:
         return LT.apply(self, self._ensure_tensor(b))
 
-    def __eq__(self, b: TensorLike) -> Tensor:
+    def __eq__(self, b: TensorLike) -> Tensor:  # type: ignore[override]
         return EQ.apply(self, self._ensure_tensor(b))
 
     def __gt__(self, b: TensorLike) -> Tensor:
@@ -323,27 +323,24 @@ class Tensor:
         return Neg.apply(self)
 
     def __radd__(self, b: TensorLike) -> Tensor:
-        return Add.apply(self._ensure_tensor(b), self)
+        return self + b
 
     def __rsub__(self, b: TensorLike) -> Tensor:
         return Add.apply(self._ensure_tensor(b), Neg.apply(self))
 
     def __rmul__(self, b: TensorLike) -> Tensor:
-        return Mul.apply(self._ensure_tensor(b), self)
+        return self * b
 
     def all(self, dim: Optional[int] = None) -> Tensor:
         """Returns True if all elements are True."""
-        if dim is not None:
-            return All.apply(self, self._ensure_tensor(dim))
+        if dim is None:
+            return All.apply(self.view(self.size), self._ensure_tensor(0))
         else:
-            result = self
-            for i in range(self.dims):
-                result = All.apply(result, self._ensure_tensor(i))
-            return result.view(1)
+            return All.apply(self, self._ensure_tensor(dim))
 
-    def is_close(self, b: TensorLike) -> Tensor:
+    def is_close(self, y: Tensor) -> Tensor:
         """Returns True if the tensor is close to another tensor."""
-        return IsClose.apply(self, self._ensure_tensor(b))
+        return IsClose.apply(self, y)
 
     def sigmoid(self) -> Tensor:
         """Return the sigmoid of the tensor."""
@@ -370,33 +367,22 @@ class Tensor:
         """Return the sum of the tensor.
         If dim is None, return one element.
         """
-        if dim is not None:
-            return Sum.apply(self, self._ensure_tensor(dim))
-
-        # Sum all elements if dim is None
+        if dim is None:
+            return Sum.apply(self.contiguous().view(self.size), self._ensure_tensor(0))
         else:
-            result = self
-            for i in range(self.dims):
-                result = Sum.apply(result, self._ensure_tensor(i))
-            return result.view(1)
+            return Sum.apply(self, self._ensure_tensor(dim))
 
     def mean(self, dim: Optional[int] = None) -> Tensor:
         """Return the mean of the tensor."""
         if dim is not None:
-            return self.sum(dim) / int(self.shape[dim])
+            return self.sum(dim) / self.shape[dim]
         else:
             return self.sum() / self.size
 
-    def permute(self, *dims: Optional[int]) -> Tensor:
-        """Permutes the dimensions of the tensor.
-        FIX
-        """
-        if dims is None:
-            return Copy.apply(self)
-        return Permute.apply(self, tensor(dims))
+    def permute(self, *order: int) -> Tensor:
+        """Permutes the dimensions of the tensor."""
+        return Permute.apply(self, tensor(list(order)))
 
-    def view(self, *dim: Optional[int]) -> Tensor:
-        """Reshapes the tensor."""
-        if dim is None:
-            return Copy.apply(self)
-        return View.apply(self, tensor(dim))
+    def view(self, *shape: int) -> Tensor:
+        """Reshapes the tensor to a new shape with the same size."""
+        return View.apply(self, tensor(list(shape)))

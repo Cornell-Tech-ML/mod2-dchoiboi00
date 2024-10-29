@@ -103,7 +103,7 @@ class Add(Function):
 
 class All(Function):
     @staticmethod
-    def forward(ctx: Context, a: Tensor, dim: Tensor) -> Tensor:
+    def forward(ctx: Context, a: Tensor, dim: Tensor | None = None) -> Tensor:
         """Return 1 if all are true"""
         if dim is not None:
             return a.f.mul_reduce(a, int(dim.item()))
@@ -129,21 +129,15 @@ class Sigmoid(Function):
     @staticmethod
     def forward(ctx: Context, t1: Tensor) -> Tensor:
         """Forward for sigmoid"""
-        ctx.save_for_backward(t1)
-        return t1.f.sigmoid_map(t1)
+        out = t1.f.sigmoid_map(t1)
+        ctx.save_for_backward(out)
+        return out
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
         """Backward for sigmoid"""
-        (t1,) = ctx.saved_values
-        sigmoid_t1 = t1.f.sigmoid_map(t1)
-        return grad_output.f.mul_zip(
-            grad_output,
-            grad_output.f.mul_zip(
-                sigmoid_t1,
-                t1.f.add_zip(grad_output._ensure_tensor(1.0), t1.f.neg_map(sigmoid_t1)),
-            ),
-        )
+        sigma: Tensor = ctx.saved_values[0]
+        return sigma * (-sigma + 1.0) * grad_output
 
 
 class ReLU(Function):
@@ -205,7 +199,7 @@ class LT(Function):
     @staticmethod
     def forward(ctx: Context, a: Tensor, b: Tensor) -> Tensor:
         """Forward for less than"""
-        ctx.save_for_backward(a, b)
+        ctx.save_for_backward(a.shape, b.shape)
         return a.f.lt_zip(a, b)
 
     @staticmethod
@@ -213,8 +207,8 @@ class LT(Function):
         """Backward for less than
         Should the shapes be swapped?
         """
-        a, b = ctx.saved_values
-        return zeros(a.shape), zeros(b.shape)
+        a_shape, b_shape = ctx.saved_values
+        return zeros(a_shape), zeros(b_shape)
 
 
 class EQ(Function):
@@ -252,18 +246,14 @@ class Permute(Function):
         """Backward for permute
         Does permute return just a Tensor?
         """
-        (orig_order,) = ctx.saved_values
-        # Calculate the inverse permutation
-        invertorder = [
-            i
-            for i, _ in sorted(
-                list(enumerate([int(orig_order[j]) for j in range(orig_order.size)])),
-                key=lambda x: x[1],
+        order: Tensor = ctx.saved_values[0]
+        order2: List[int] = [
+            a[0]
+            for a in sorted(
+                enumerate([order[i] for i in range(order.size)]), key=lambda a: a[1]
             )
         ]
-        # Use the permute method from TensorData for the inverse permutation
-        new_data = grad_output._tensor.permute(*invertorder)
-        return grad_output._new(new_data), 0.0
+        return grad_output._new(grad_output._tensor.permute(*order2)), 0.0
 
 
 class View(Function):
